@@ -86,6 +86,22 @@ def predict_batch(net, patches_np, img_size, multimask_output):
     return predictions
 
 
+def tile_starts(length, tile_size, stride_size):
+    """Compute tile start positions that fully cover [0, length).
+
+    When length <= tile_size, returns [0] (the single tile is padded externally).
+    Otherwise, returns sorted starts where every start + tile_size <= length,
+    and the last start is positioned so the tile ends exactly at length.
+    """
+    if length <= tile_size:
+        return [0]
+    starts = list(range(0, length - tile_size, stride_size))
+    last = length - tile_size
+    if starts[-1] != last:
+        starts.append(last)
+    return starts
+
+
 def predict_image_tiled(net, image_np, img_size, multimask_output, overlap, batch_size=8):
     """Tile the image into overlapping patches, predict in batches, stitch together.
 
@@ -94,26 +110,16 @@ def predict_image_tiled(net, image_np, img_size, multimask_output, overlap, batc
     """
     h, w = image_np.shape[:2]
     tile = img_size
-    stride = tile - overlap
-
-    # Compute tile start positions, ensuring we cover the full image
-    def tile_starts(length, tile_size, stride_size):
-        starts = list(range(0, length - tile_size + 1, stride_size))
-        # Ensure the last tile covers the edge
-        if not starts or starts[-1] + tile_size < length:
-            starts.append(max(0, length - tile_size))
-        return starts
+    stride = max(1, tile - overlap)
 
     y_starts = tile_starts(h, tile, stride)
     x_starts = tile_starts(w, tile, stride)
 
-    # If image is smaller than one tile in either dimension, pad it
-    if h < tile or w < tile:
-        pad_h = max(tile - h, 0)
-        pad_w = max(tile - w, 0)
+    # Pad image if smaller than tile in either dimension
+    pad_h = max(tile - h, 0)
+    pad_w = max(tile - w, 0)
+    if pad_h > 0 or pad_w > 0:
         image_np = np.pad(image_np, ((0, pad_h), (0, pad_w), (0, 0)), mode='reflect')
-        y_starts = [0]
-        x_starts = [0]
 
     prediction = np.zeros((image_np.shape[0], image_np.shape[1]), dtype=np.float32)
 
